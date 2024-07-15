@@ -112,4 +112,209 @@ println("{s}"); // This will print `hello, world!`
 
 ## <ins>Variables and Data Interacting with Move</ins>
 
-####
+#### Multiple variables can interact with the same data in different ways in Rust. Let's look at an example using an integer in the following:
+
+```
+let x = 5;
+let y =x;
+```
+
+#### We can probably guess what this is doing: "bind the value `5` to `x`; then make a copy of the value in `x` and bind it to `y`" We now have two variables, `x` and `y`, and both equal `5`. This is indeed what is happening, because integers are simple values with a known, fixed size, and these two `5` values are pushed onto the stack.
+
+#### Now let's look at the `String` version:
+
+```
+let s1 = String::from("hello");
+let s2 = s1;
+```
+
+#### This looks similar, so we might assume that the way it works would be the same: that is, the second line would make a copy of the value in `s1` and bind it to `s2`. But this isn't quite what happens.
+
+#### Take a look at the figure below to see what is happening to `String` under the covers. A `String` is made up of three parts, shown on the left: a pointer to the memory that holds the contents of the string, a length, and a capacity. This group of data is stored on the stack. On the right is the memory on the heap that holds the contents.
+
+![figure image for String](img/string-type.svg)
+
+#### The length is how much memory, in bytes, the contents of the `String` are currently using. The capacity is the total amount of memory, in bytes, that the `String` has received from the allocator. The difference between length and capacity matters, but not in this context, so for now, it's fine to ignore the capacity.
+
+#### When we assign `s1` to `s2`, the `String` data is copied, meaning we copy the pointer, the length, and the capacity that are on the stack. We do not copy the data on the ehap that the pointer refers to. In others words, the data representation in memory looks like the following figure:
+
+![figure image for "copying" String](img/copy-string-type.svg)
+
+#### The representation does *not* look like the following figure, which is what memory would look like if Rust instead copied the ehap data as well. If Rust did this, the operation `s2 = s1` could be very expensive in terms of runtime performance if the data on the heap were large
+
+![figure image wrong String copy](img/wrong-string-type.svg)
+
+#### Earlier, we said that when a variable goes out of scope, Rust automatically calls the `drop` function and clean up the heap memory for that variable. But the second figure shows both data pointers pointing to the same location. This is a problem: when `s2` and `s1` go out of scope, they will both try to free the same memory. This is known as *double free* error and is one of the memory safety bugs we mentioned previously. Freeing memory twice can lead to memory corruption, which can potentially lead to security vulnerabilities.
+
+#### To ensure memory safety, after the line `let s2 = s1;`, Rust considers `s1` as no longer valid. Therefore, Rust doesn't need to free anything when `s1` goes out of scope. Check out what happens when you try to use `s1` after `s2` is created; it won't work:
+
+```
+ let s1 = String::from("hello");
+ let s2 = s1;
+
+ println!("{s1}, world!");
+```
+
+#### You'll get an error like this because Rust prevents you from using the invalidated reference:
+
+```
+$ cargo run
+   Compiling ownership v0.1.0 (file:///projects/ownership)
+error[E0382]: borrow of moved value: `s1`
+ --> src/main.rs:5:28
+  |
+2 |     let s1 = String::from("hello");
+  |         -- move occurs because `s1` has type `String`, which does not implement the `Copy` trait
+3 |     let s2 = s1;
+  |              -- value moved here
+4 |
+5 |     println!("{}, world!", s1);
+  |                            ^^ value borrowed here after move
+  |
+  = note: this error originates in the macro `$crate::format_args_nl` which comes from the expansion of the macro `println` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider cloning the value if the performance cost is acceptable
+  |
+3 |     let s2 = s1.clone();
+  |                ++++++++
+
+For more information about this error, try `rustc --explain E0382`.
+error: could not compile `ownership` (bin "ownership") due to 1 previous error
+```
+
+#### If you've heard the terms *shallow copy* while working with other languages, the concept of copying pointers, length, and capacity without copying the data probably sounds like making a shallow copy. But because Rust also invalidates the first variable, instead of being called a shallow copy, it's known as a *move*. In this example, we would say that `s1` was *moved* into `s2`. So, what actually happens is shown below.
+
+![move String type](img/move-string-type.svg)
+
+#### That solves our problem! With only `s2` valid, when it goes out of scope it alone will free the memory, and we're done.
+
+## <ins>Variables and Data Interacting with Clone</ins>
+
+#### If we *do* want to deeply copy the heap data of the `String`, not just the stack data, we can use a common method called `clone`. We'll discuss method syntax in Chapter 5, but because methods are a common feature in many programming languages, you've probably seen them before.
+
+#### Here's an exampel of the `clone` method in action:
+
+```
+let s1 = String::from("hello");
+let s2 = s1.clone();
+
+println!("s1 = {s1}, s2 = {s2});
+```
+
+#### This works just fine and explicitly produces the behavior shown in the figure of the `Wrong Representation of Moving String Type`, where the heap data *does* get copied.
+
+#### When you see a call to `clone`, you know that some arbitrary code is being executed and that code may be expensive. It's a visual indicator that something different is going on.
+
+## <ins>Stack-Only Data: Copy</ins>
+
+#### There's another wrinkle we haven't talked about yet. This code using integers works and is valid:
+
+```
+let x = 5;
+let y = x;
+
+println!("x = {x}, y = {y}");
+```
+
+#### But this code seems to contradict what we just learned: we don't have a call to `clone`, but `x` is still valid and wasn't *moved* into `y`.
+
+#### The reason is that types such as integers that have a known size at compile time are stored entirely on the stack, so copies of the actual values are quick to make. That means there's no reason we would want to prevent `x` from being valid after we create the variable `y`. In other words, there's no difference between deep and shallow copying here, so calling `clone` wouldn't do anything different from the usual shallow copying, and we can leave it out.
+
+#### Rust has a special annotation called the `Copy` trait that we can place on types that are stored on the stack, as integers are. If a type implements the `Copy` trait, variables that use it do not move, but rather are trivially copied, making them still valid after assignment to another variable.
+
+#### Rust won't let us annotate a type with `Copy` if the type, or any of its parts, has implemented the `Drop` trait. If the type needs something special to happen when the value goes out of scope and we add the `Copy` annotation to that type, we'll get a compile-time error.
+
+#### So, what types implement the `Copy` trait? You can check the documentation for the given type to be sure, but as a general rule, any group of simple scalar values can implement `Copy`, and nothing that requires allocation or is some form of resource can implement `Copy`. Here are some of the types that implement `Copy`:
+
+* All the integer types, such as `u32`.
+* The Boolean type, `bool`, with values `true` and `false`.
+* All the floating-point types, such as `f64`.
+* The character type, `char`.
+* Tuples, if they only containt types that also implement `Copy`. For example, `(i32, i32)` implements `Copy`, but `(i32, String)` does not.
+
+## <ins>Ownership and Functions</ins>
+
+#### The mechanics of passing a value to a function are similar to those when assigning a value to a variable. Passing a variable to a function will move or copy, just as assignment does. The following figure has an example with some annotation showing where variables go into and out of scope.
+
+```
+fn main() {
+	let s = String::from("hello");	// s comes into scope
+
+	takes_ownership(s);				// s's value moves into the function...
+							// ... and so is no longer valid here
+
+	let x = 5;					// x comes into scope
+
+	makes_copy(x);					// x would move into the function,
+							// but i32 is Copy, so it's okay to still
+							// use x afterward
+
+} // Here, x goes out of scope, then s. But because s's value was moved, nothing 
+  // speacial happens
+
+fn takes_ownership(some_string: String) { // some_string comes into scope
+	println!("{some_string}");
+} // Here, some_string goes out scope and `drop` is called. The backing
+  // memory is freed.
+
+fn makes_copy(some_integer: i32) { // some_integer comes into scope
+	println!("{some_integer}");
+} // Here, some_integer goes out of scope. Nothing special happens.
+```
+
+#### If we tried to use `s` after the call to `takes_ownership`, Rust would throw a compile-time error. These static checks protect us from mistakes. Try adding code to `main` that uses `s` and `x` to see where you can use them and where the ownership rules prevent you from doing so.
+
+## <ins>Return Values and Scope</ins>
+
+#### Returning values can also transfer ownership. The following example shows a function that returns some value, with similar annotations as the previous example.
+
+```
+fn main() {
+	let s1 = gives_ownership();			// gives_ownership moves its return 
+							// value into s1
+	let s2 = String::from("hello"); 		// s2 comes into scope
+
+	let s3 = takes_and_gives_back(s2);		// s2 is moved into
+							// takes_and_gives_back, which also
+							//moves its return value into s3
+}	// Here, s3 goes out of scope and is dropped. s2 was moved, so nothing
+	// happens. s1 goes out of scope and is dropped
+
+fn gives_ownership() -> String {			// gives_ownership will move its
+							// return value into the function
+							// that calls it
+
+	let some_string = String::from("yours");	// some_string is returned and
+							// moves out to the calling
+							// function
+}
+
+// This function takes a String and returns one
+fn takes_and_gives_bakc(a_string: String) -> String {	// a_string comes into
+							// scope
+	
+	a_string	// a_string is returned and moves out to the calling function
+}
+```
+
+#### The ownerhsip of a variable follows the same pattern every time: assigning a value to another variable moves it. When a variable that includes data on the heap goes out of scope, the value will be cleaned up by `drop` unless ownership of the data has been moved to another variable.
+
+#### While this works, taking ownership and then returning ownership with every function is a bit tedious. What if we want to let a function use a value but not take ownership? It's quite annoying that anything we pass in also needs to be passed back if we want to use it again, in addition to any data resulting from the body of the fucntion that we might wat to return as well.
+
+#### Rust does let us return multiple values using a tuple, as shown below.
+
+```
+fn main() {
+	let s1 = String::from("hello");
+	let (s2, len) = calculate_length(s1);
+
+	println!("The length of '{s2}' is {len}.");
+}
+
+fn calculate_length(s: String) -> (String, usize) {
+	let length = s.len();	// len() returns the length of a String
+
+	(s, length)
+}
+```
+
+#### But this is too much ceremony and a lot of work for a concept that should be common. Luckily, Rust has a feature for using a value without transferring ownership, called *references*
