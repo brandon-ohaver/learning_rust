@@ -1,0 +1,6 @@
+[package]
+name = "def_enum"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
