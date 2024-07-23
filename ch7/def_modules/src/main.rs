@@ -1,3 +1,8 @@
+use crate::garden::vegetables::Asparagus;
+
+pub mod garden; // this refers to src/garden.rs
+
 fn main() {
-    println!("Hello, world!");
+	let plant = Asparagus {};
+	println!("I'm growing {plant:?}");
 }
