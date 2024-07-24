@@ -1,4 +1,5 @@
-struct One {}
+#[derive(Debug)]
+pub struct One {}
 
 struct Two {}
 
